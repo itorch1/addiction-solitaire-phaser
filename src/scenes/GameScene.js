@@ -23,7 +23,7 @@ export default class GameScene extends Phaser.Scene {
 
     for (const suit of suits)
       for (const value of values)
-        this.load.image(`${value}_of_${suit}`, `src/assets/cards/${value}_of_${suit}.png`);
+        this.load.image(`${value}_of_${suit}`, new URL(`../assets/cards/${value}_of_${suit}.png`, import.meta.url).href);
 
     this.load.image("empty_slot", "src/assets/cards/empty_slot.png");
   }
