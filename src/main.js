@@ -4,8 +4,8 @@ import './style.css'
 
 const config = {
   type: Phaser.AUTO,
-  width: window.innerWidth,
-  height: window.innerHeight,
+  width: '100%',
+  height: '100%',
   backgroundColor: "#0a5e20",
   scale: {
     mode: Phaser.Scale.RESIZE,

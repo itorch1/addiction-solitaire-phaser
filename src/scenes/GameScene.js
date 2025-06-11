@@ -1,19 +1,24 @@
 // src/scenes/GameScene.js
 import Phaser from "phaser";
 import { CARD_CONFIG } from "../config/constants";
-import { createEndGameScreen, hideEndGameScreen, showEndGameScreen } from "../ui/endGameScreen";
+import {
+  createEndGameScreen,
+  hideEndGameScreen,
+  showEndGameScreen,
+} from "../ui/endGameScreen";
 import { startTimerEvent, updateHeaderText } from "../ui/headerUI";
 import { generateBoard, isWinningRow } from "../utils/boardUtils";
 import { getSlotPosition } from "../utils/positionUtils";
 import { createCardSprite } from "../utils/spriteFactory";
+import { isValidMove } from "../utils/rules";
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super("GameScene");
 
     this.SCALE = CARD_CONFIG.SCALE;
-    this.CARD_WIDTH = CARD_CONFIG.CARD_WIDTH;
-    this.CARD_HEIGHT = CARD_CONFIG.CARD_HEIGHT;
+    this.CARD_WIDTH = CARD_CONFIG.CARD_WIDTH * this.SCALE;
+    this.CARD_HEIGHT = CARD_CONFIG.CARD_HEIGHT * this.SCALE;
     this.GAP = CARD_CONFIG.GAP;
   }
 
@@ -23,7 +28,11 @@ export default class GameScene extends Phaser.Scene {
 
     for (const suit of suits)
       for (const value of values)
-        this.load.image(`${value}_of_${suit}`, new URL(`../assets/cards/${value}_of_${suit}.png`, import.meta.url).href);
+        this.load.image(
+          `${value}_of_${suit}`,
+          new URL(`../assets/cards/${value}_of_${suit}.png`, import.meta.url)
+            .href
+        );
 
     this.load.image("empty_slot", "src/assets/cards/empty_slot.png");
   }
@@ -35,6 +44,9 @@ export default class GameScene extends Phaser.Scene {
     hideEndGameScreen(this);
 
     this.setupHeaderUI();
+    this.handleResize(this.scale.gameSize);
+    this.scale.on("resize", this.handleResize, this);
+
     this.renderBoard();
     this.setupDragHandlers();
   }
@@ -51,13 +63,18 @@ export default class GameScene extends Phaser.Scene {
   }
 
   setupHeaderUI() {
-    this.headerText = this.add.text(this.scale.width / 2, 20, "", {
+    const styles = {
       fontSize: "24px",
       fontFamily: "Arial",
-      color: "#ffffff",
-    }).setOrigin(0.5, 0);
+      color: "#fff",
+      
+    };
 
-    updateHeaderText(this);
+    this.headerText = this.add
+      .text(this.scale.width / 2, 20, "", styles)
+      .setOrigin(0.5, 0)
+      .setLineSpacing(10);
+
     this.timerEvent = startTimerEvent(this);
   }
 
@@ -86,17 +103,23 @@ export default class GameScene extends Phaser.Scene {
     this.input.on("dragend", (pointer, gameObject) => {
       const fromIndex = gameObject.getData("index");
       const toIndex = this.findEmptySlotIndex(pointer.x, pointer.y);
-      const targetPos = toIndex !== -1 ? this.slotPositions[toIndex] : this.slotPositions[fromIndex];
+
+      const [rank, _, suit] = gameObject.texture.key.split("_");
+      const card = { rank, suit };
+      const isValid = toIndex !== -1 && isValidMove(card, toIndex, this);
+      const targetPos = isValid
+        ? this.slotPositions[toIndex]
+        : this.slotPositions[fromIndex];
 
       this.tweens.add({
         targets: gameObject,
         x: targetPos.x,
         y: targetPos.y,
-        duration: toIndex !== -1 ? 150 : 400,
+        duration: isValid ? 150 : 400,
         ease: "Power2",
       });
 
-      if (toIndex !== -1) {
+      if (isValid) {
         this.moves++;
         this.board[toIndex] = this.board[fromIndex];
         this.board[fromIndex] = null;
@@ -152,8 +175,22 @@ export default class GameScene extends Phaser.Scene {
     if (winCount === 4 && !this.winTriggered) {
       this.winTriggered = true;
 
-      const timeBonus = this.timerSeconds < 60 ? 3000 : this.timerSeconds < 120 ? 2000 : this.timerSeconds < 180 ? 1000 : 0;
-      const moveBonus = this.moves < 30 ? 3000 : this.moves < 50 ? 2000 : this.moves < 70 ? 1000 : 0;
+      const timeBonus =
+        this.timerSeconds < 60
+          ? 3000
+          : this.timerSeconds < 120
+          ? 2000
+          : this.timerSeconds < 180
+          ? 1000
+          : 0;
+      const moveBonus =
+        this.moves < 30
+          ? 3000
+          : this.moves < 50
+          ? 2000
+          : this.moves < 70
+          ? 1000
+          : 0;
 
       this.score += timeBonus + moveBonus;
       updateHeaderText(this);
@@ -173,7 +210,11 @@ export default class GameScene extends Phaser.Scene {
 
       for (let i = 0; i < 6; i++) {
         const card = this.board[start + i];
-        if (!card || card.rank !== expectedRanks[i] || (i > 0 && card.suit !== suit)) {
+        if (
+          !card ||
+          card.rank !== expectedRanks[i] ||
+          (i > 0 && card.suit !== suit)
+        ) {
           sequenceValid = false;
           break;
         }
@@ -186,5 +227,40 @@ export default class GameScene extends Phaser.Scene {
 
     this.score = liveScore;
     updateHeaderText(this);
+  }
+
+  handleResize(gameSize) {
+    const width = gameSize.width;
+    const height = gameSize.height;
+
+    // Reposition header
+    const isViewportSmall = height < 700;
+    if (isViewportSmall) this.headerText.setPosition(80, height / 2 - 50);
+    else this.headerText.setPosition(width / 2, 20);
+
+    updateHeaderText(this)
+
+    // Recalculate and store new slot positions
+    this.slotPositions = this.board.map((_, i) => getSlotPosition(i, this));
+
+    // Move all cards to their new positions
+    this.cardSprites.forEach((sprite) => {
+      const index = sprite.getData("index");
+      const { x, y } = this.slotPositions[index];
+      sprite.setPosition(x, y);
+    });
+
+    // Recalculate end screen layout if visible
+    if (this.endScreenGroup?.visible) {
+      this.endScreenGroup.setSize(width, height);
+      this.endScreenGroup.list.forEach((child) => {
+        if (child.setPosition) {
+          // Example: you may want to reposition each text/button manually here
+        }
+      });
+    }
+
+    // Re-render win glow outlines
+    this.checkWinningRows();
   }
 }
